@@ -25,6 +25,12 @@ def generate_launch_description():
         description='Linear velocity magnitude in m/s'
     )
 
+    ang_velocity_arg = DeclareLaunchArgument(
+        'angular_velocity', default_value='0.5',
+        description='Angular velocity in rad/s for yaw rotation'
+)
+
+
     min_obstacle_distance_arg = DeclareLaunchArgument(
         'min_obstacle_distance', default_value='0.5',
         description='Minimum allowed obstacle distance in meters'
@@ -36,6 +42,7 @@ def generate_launch_description():
         cmd_vel_topic_arg,
         laser_scan_topic_arg,
         velocity_arg,
+        ang_velocity_arg,
         min_obstacle_distance_arg,
 
         Node(
@@ -50,6 +57,7 @@ def generate_launch_description():
             ],
             parameters=[{
                 'velocity': LaunchConfiguration('velocity'),
+                'angular_velocity': LaunchConfiguration('angular_velocity'),
                 'min_obstacle_distance': LaunchConfiguration('min_obstacle_distance')
             }]
         )
