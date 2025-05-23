@@ -35,6 +35,7 @@ def generate_launch_description():
         'min_obstacle_distance', default_value='0.5',
         description='Minimum allowed obstacle distance in meters'
     )
+    
 
 
     return LaunchDescription([
@@ -60,5 +61,31 @@ def generate_launch_description():
                 'angular_velocity': LaunchConfiguration('angular_velocity'),
                 'min_obstacle_distance': LaunchConfiguration('min_obstacle_distance')
             }]
+        ),
+
+        Node(
+            package='image_transport',
+            executable='republish',
+            name='image_republish',
+            namespace='mavic_1/decoded',
+            output='screen',
+            arguments=[
+                'ffmpeg', 'compressed',
+                '--ros-args',
+                '--remap', 'in/ffmpeg:=/mavic_1/image/ffmpeg',
+                '--remap', 'out:=/mavic_1/decoded'
+            ],
+            parameters=[
+                {'ffmpeg_image_transport.decode.threads': 4},
+                {'ffmpeg_image_transport.map.hevc_nvenc': 'hevc_nvenc'}
+            ]
+        ),
+
+        Node(
+            package='rqt_image_view',
+            executable='rqt_image_view',
+            name='rqt_image_view',
+            output='screen',
+            # arguments=['/mavic_1/decoded']
         )
     ])
