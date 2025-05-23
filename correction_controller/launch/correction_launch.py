@@ -81,11 +81,11 @@ def generate_launch_description():
             ]
         ),
 
-        Node(
-            package='rqt_image_view',
-            executable='rqt_image_view',
-            name='rqt_image_view',
-            output='screen',
-            # arguments=['/mavic_1/decoded']
-        )
+        # Node(
+        #     package='rqt_image_view',
+        #     executable='rqt_image_view',
+        #     name='rqt_image_view',
+        #     output='screen',
+        #     # arguments=['/mavic_1/decoded']
+        # )
     ])

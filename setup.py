@@ -23,6 +23,7 @@ setup(
     entry_points={
     'console_scripts': [
         'correction_node = correction_controller.correction_node:main',
+        'query_image_pub_node = correction_controller.query_image_pub:main',
     ],
     },
 )
