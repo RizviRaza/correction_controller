@@ -2,6 +2,7 @@ import rclpy
 from sensor_msgs.msg import LaserScan
 from rclpy.node import Node
 from geometry_msgs.msg import Pose, Twist
+from std_msgs.msg import Bool
 import math
 import time
 
@@ -17,6 +18,9 @@ class OpenLoopCorrectionNode(Node):
             LaserScan, '/scan', self.laser_callback, 10)
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
+        self.estop_sub = self.create_subscription(
+            Bool, '/estop', self.estop_callback, 10)
+
         # Timer for control loop (10 Hz)
         self.timer = self.create_timer(0.1, self.control_loop)
 
@@ -29,6 +33,8 @@ class OpenLoopCorrectionNode(Node):
         # Obstacle detection
         self.obstacle_too_close = False
         self.was_paused = False
+
+        self.estop_active = False
 
         # Parameters
         self.declare_parameter('velocity', 0.1)
@@ -46,7 +52,27 @@ class OpenLoopCorrectionNode(Node):
         self.rotation_duration = 0.0
         self.rotation_elapsed = 0.0
 
+    def estop_callback(self, msg: Bool):
+        self.estop_active = msg.data
+        if self.estop_active:
+            self.get_logger().warn("Estop engaged! Cancelling motion and halting the drone.")
+            self.state = 'idle'
+            self.target_twist = None
+            self.rotation_twist = None
+            self.duration = 0.0
+            self.elapsed_time = 0.0
+            self.rotation_duration = 0.0
+            self.rotation_elapsed = 0.0
+            self.cmd_vel_pub.publish(Twist())  # Stop immediately
+        else:
+            self.get_logger().info("Estop released. Ready to accept new commands.")
+
+
     def pose_callback(self, msg):
+        if self.estop_active:
+            self.get_logger().warn("Estop active. Ignoring correction command.")
+            return
+        
         if self.state != 'idle':
             self.get_logger().warn("Still executing a correction. Ignoring new command.")
             return
@@ -95,6 +121,10 @@ class OpenLoopCorrectionNode(Node):
             r < self.min_obstacle_distance for r in msg.ranges if r > 0.0 and math.isfinite(r))
 
     def control_loop(self):
+        if self.estop_active:
+            self.cmd_vel_pub.publish(Twist())  # Force stop
+            return
+        
         if self.state == 'executing':
             if self.obstacle_too_close:
                 if not self.was_paused:
