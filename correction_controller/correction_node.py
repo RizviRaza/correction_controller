@@ -1,10 +1,8 @@
 import rclpy
-from sensor_msgs.msg import LaserScan
 from rclpy.node import Node
 from geometry_msgs.msg import Pose, Twist
 from std_msgs.msg import Bool
 import math
-import time
 
 
 class OpenLoopCorrectionNode(Node):
@@ -14,12 +12,12 @@ class OpenLoopCorrectionNode(Node):
         # Subscriptions
         self.subscription = self.create_subscription(
             Pose, '/correction_pose', self.pose_callback, 10)
-        self.laser_sub = self.create_subscription(
-            LaserScan, '/scan', self.laser_callback, 10)
-        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
         self.estop_sub = self.create_subscription(
             Bool, '/estop', self.estop_callback, 10)
+
+        # Publisher
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
         # Timer for control loop (10 Hz)
         self.timer = self.create_timer(0.1, self.control_loop)
@@ -30,18 +28,11 @@ class OpenLoopCorrectionNode(Node):
         self.duration = 0.0
         self.elapsed_time = 0.0
 
-        # Obstacle detection
-        self.obstacle_too_close = False
-        self.was_paused = False
-
         self.estop_active = False
 
         # Parameters
         self.declare_parameter('velocity', 0.1)
         self.vel_mag = self.get_parameter('velocity').get_parameter_value().double_value
-
-        self.declare_parameter('min_obstacle_distance', 0.5)
-        self.min_obstacle_distance = self.get_parameter('min_obstacle_distance').get_parameter_value().double_value
 
         self.declare_parameter('angular_velocity', 0.5)
         self.angular_vel_mag = self.get_parameter('angular_velocity').get_parameter_value().double_value
@@ -67,12 +58,11 @@ class OpenLoopCorrectionNode(Node):
         else:
             self.get_logger().info("Estop released. Ready to accept new commands.")
 
-
-    def pose_callback(self, msg):
+    def pose_callback(self, msg: Pose):
         if self.estop_active:
             self.get_logger().warn("Estop active. Ignoring correction command.")
             return
-        
+
         if self.state != 'idle':
             self.get_logger().warn("Still executing a correction. Ignoring new command.")
             return
@@ -108,36 +98,20 @@ class OpenLoopCorrectionNode(Node):
         self.target_yaw = yaw
 
         self.get_logger().info(
-            f"Starting translation: {distance:.2f} m over {self.duration:.2f} s, yaw target = {math.degrees(yaw):.1f}°")
+            f"Starting translation: {distance:.2f} m over {self.duration:.2f} s, "
+            f"yaw target = {math.degrees(yaw):.1f}°"
+        )
 
         self.state = 'executing'
-
-    def laser_callback(self, msg: LaserScan):
-        if not msg.ranges:
-            self.obstacle_too_close = False
-            return
-
-        self.obstacle_too_close = any(
-            r < self.min_obstacle_distance for r in msg.ranges if r > 0.0 and math.isfinite(r))
 
     def control_loop(self):
         if self.estop_active:
             self.cmd_vel_pub.publish(Twist())  # Force stop
             return
-        
-        if self.state == 'executing':
-            if self.obstacle_too_close:
-                if not self.was_paused:
-                    self.get_logger().warn("Obstacle too close! Pausing motion.")
-                    self.was_paused = True
-                self.cmd_vel_pub.publish(Twist())
-                return
-            elif self.was_paused:
-                self.get_logger().info("Obstacle cleared. Resuming motion.")
-                self.was_paused = False
 
+        if self.state == 'executing':
             self.elapsed_time += 0.1
-            if self.elapsed_time < self.duration:
+            if self.elapsed_time < self.duration and self.target_twist is not None:
                 self.cmd_vel_pub.publish(self.target_twist)
             else:
                 self.cmd_vel_pub.publish(Twist())
@@ -154,23 +128,15 @@ class OpenLoopCorrectionNode(Node):
 
                     self.state = 'rotating'
                     self.get_logger().info(
-                        f"Starting rotation: {math.degrees(self.target_yaw):.1f}° over {self.rotation_duration:.2f} s")
+                        f"Starting rotation: {math.degrees(self.target_yaw):.1f}° "
+                        f"over {self.rotation_duration:.2f} s"
+                    )
                 else:
                     self.state = 'idle'
 
         elif self.state == 'rotating':
-            if self.obstacle_too_close:
-                if not self.was_paused:
-                    self.get_logger().warn("Obstacle too close! Pausing rotation.")
-                    self.was_paused = True
-                self.cmd_vel_pub.publish(Twist())
-                return
-            elif self.was_paused:
-                self.get_logger().info("Obstacle cleared. Resuming rotation.")
-                self.was_paused = False
-
             self.rotation_elapsed += 0.1
-            if self.rotation_elapsed < self.rotation_duration:
+            if self.rotation_elapsed < self.rotation_duration and self.rotation_twist is not None:
                 self.cmd_vel_pub.publish(self.rotation_twist)
             else:
                 self.cmd_vel_pub.publish(Twist())
