@@ -36,20 +36,20 @@ def generate_launch_description():
         velocity_arg,
         ang_velocity_arg,
 
-        Node(
-            package='correction_controller',
-            executable='correction_node',
-            name='correction_controller_node',
-            output='screen',
-            remappings=[
-                ('/correction_pose', LaunchConfiguration('correction_topic')),
-                ('/cmd_vel', LaunchConfiguration('cmd_vel_topic')),
-            ],
-            parameters=[{
-                'velocity': LaunchConfiguration('velocity'),
-                'angular_velocity': LaunchConfiguration('angular_velocity'),
-            }]
-        ),
+        # Node(
+        #     package='correction_controller',
+        #     executable='correction_node',
+        #     name='correction_controller_node',
+        #     output='screen',
+        #     remappings=[
+        #         ('/correction_pose', LaunchConfiguration('correction_topic')),
+        #         ('/cmd_vel', LaunchConfiguration('cmd_vel_topic')),
+        #     ],
+        #     parameters=[{
+        #         'velocity': LaunchConfiguration('velocity'),
+        #         'angular_velocity': LaunchConfiguration('angular_velocity'),
+        #     }]
+        # ),
 
         Node(
             package='image_transport',
@@ -68,12 +68,4 @@ def generate_launch_description():
                 {'ffmpeg_image_transport.map.hevc_nvenc': 'hevc_nvenc'}
             ]
         ),
-
-        # Node(
-        #     package='rqt_image_view',
-        #     executable='rqt_image_view',
-        #     name='rqt_image_view',
-        #     output='screen',
-        #     # arguments=['/mavic_1/decoded']
-        # )
     ])

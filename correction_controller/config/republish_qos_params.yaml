@@ -1,0 +1,9 @@
+image_republish:
+  ros__parameters:
+    qos_overrides:
+      /mavic_1/image/ffmpeg:
+        subscription:
+          reliability: best_effort
+          durability: volatile
+          history: keep_last
+          depth: 5

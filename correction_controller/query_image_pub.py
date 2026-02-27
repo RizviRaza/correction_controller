@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import CompressedImage
+from sensor_msgs.msg import CompressedImage, Image
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 import sys
 import select
@@ -12,7 +12,7 @@ class QueryImagePublisher(Node):
         super().__init__('query_image_publisher')
 
         reliable_qos = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             history=HistoryPolicy.KEEP_LAST,
             depth=10
@@ -20,17 +20,17 @@ class QueryImagePublisher(Node):
 
         # Subscribes to the compressed image topic
         self.image_sub = self.create_subscription(
-            CompressedImage,
-            '/mavic_1/decoded/out/compressed',
+            Image,
+            '/mavic_1/decoded',
             self.image_callback,
             10
         )
 
         # Publisher to send latest image when spacebar is pressed
         self.image_pub = self.create_publisher(
-            CompressedImage,
-            '/query_image_rgb',
-            reliable_qos
+            Image,
+            '/mavic_1/camera/current_image',
+            10
         )
 
         self.latest_image = None

@@ -73,8 +73,12 @@ class OpenLoopCorrectionNode(Node):
         dz = msg.position.z
         distance = math.sqrt(dx**2 + dy**2 + dz**2)
 
-        if distance < 0.01:
-            self.get_logger().info("Correction too small. Ignoring.")
+        # if distance < 0.01:
+        #     self.get_logger().info("Correction too small. Ignoring.")
+        #     return
+
+        if not (0.01 <= distance <= 0.20):
+            self.get_logger().info("Correction out of bounds (0.01-0.20 m). Ignoring.")
             return
 
         norm_dx = dx / distance
@@ -95,7 +99,8 @@ class OpenLoopCorrectionNode(Node):
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         yaw = math.atan2(siny_cosp, cosy_cosp)
-        self.target_yaw = yaw
+        # self.target_yaw = yaw
+        self.target_yaw = 0.0  # For now, ignore yaw correction
 
         self.get_logger().info(
             f"Starting translation: {distance:.2f} m over {self.duration:.2f} s, "
