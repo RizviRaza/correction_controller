@@ -8,7 +8,7 @@ def generate_launch_description():
     # Declare configurable launch arguments
     correction_topic_arg = DeclareLaunchArgument(
         'correction_topic',
-        default_value='/correction_pose',
+        default_value='/visual_servo/pose_correction',
         description='Topic to subscribe for correction pose'
     )
 
@@ -20,13 +20,13 @@ def generate_launch_description():
 
     velocity_arg = DeclareLaunchArgument(
         'velocity',
-        default_value='0.02',
+        default_value='0.05',
         description='Linear velocity magnitude in m/s'
     )
 
     ang_velocity_arg = DeclareLaunchArgument(
         'angular_velocity',
-        default_value='0.5',
+        default_value='0.05',
         description='Angular velocity in rad/s for yaw rotation'
     )
 
@@ -36,20 +36,20 @@ def generate_launch_description():
         velocity_arg,
         ang_velocity_arg,
 
-        # Node(
-        #     package='correction_controller',
-        #     executable='correction_node',
-        #     name='correction_controller_node',
-        #     output='screen',
-        #     remappings=[
-        #         ('/correction_pose', LaunchConfiguration('correction_topic')),
-        #         ('/cmd_vel', LaunchConfiguration('cmd_vel_topic')),
-        #     ],
-        #     parameters=[{
-        #         'velocity': LaunchConfiguration('velocity'),
-        #         'angular_velocity': LaunchConfiguration('angular_velocity'),
-        #     }]
-        # ),
+        Node(
+            package='correction_controller',
+            executable='correction_node',
+            name='correction_controller_node',
+            output='screen',
+            remappings=[
+                ('/correction_pose', LaunchConfiguration('correction_topic')),
+                ('/cmd_vel', LaunchConfiguration('cmd_vel_topic')),
+            ],
+            parameters=[{
+                'velocity': LaunchConfiguration('velocity'),
+                'angular_velocity': LaunchConfiguration('angular_velocity'),
+            }]
+        ),
 
         Node(
             package='image_transport',

@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Pose, Twist
+from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool
 import math
 
@@ -11,7 +11,7 @@ class OpenLoopCorrectionNode(Node):
 
         # Subscriptions
         self.subscription = self.create_subscription(
-            Pose, '/correction_pose', self.pose_callback, 10)
+            Twist, '/visual_servo/pose_correction', self.twist_callback, 10)
 
         self.estop_sub = self.create_subscription(
             Bool, '/estop', self.estop_callback, 10)
@@ -34,14 +34,20 @@ class OpenLoopCorrectionNode(Node):
         self.declare_parameter('velocity', 0.1)
         self.vel_mag = self.get_parameter('velocity').get_parameter_value().double_value
 
-        self.declare_parameter('angular_velocity', 0.5)
+        self.declare_parameter('angular_velocity', 0.1)
         self.angular_vel_mag = self.get_parameter('angular_velocity').get_parameter_value().double_value
 
         # Rotation handling
-        self.target_yaw = 0.0
+        self.target_angular_y = 0.0
         self.rotation_twist = None
         self.rotation_duration = 0.0
         self.rotation_elapsed = 0.0
+
+        # Threshold: 2 degrees in radians
+        self.angular_threshold_rad = math.radians(2.0)
+
+        # Sequential translation queue
+        self.translation_queue = []
 
     def estop_callback(self, msg: Bool):
         self.estop_active = msg.data
@@ -50,15 +56,17 @@ class OpenLoopCorrectionNode(Node):
             self.state = 'idle'
             self.target_twist = None
             self.rotation_twist = None
+            self.translation_queue = []
             self.duration = 0.0
             self.elapsed_time = 0.0
             self.rotation_duration = 0.0
             self.rotation_elapsed = 0.0
-            self.cmd_vel_pub.publish(Twist())  # Stop immediately
+            self.target_angular_y = 0.0
+            self.cmd_vel_pub.publish(Twist())
         else:
             self.get_logger().info("Estop released. Ready to accept new commands.")
 
-    def pose_callback(self, msg: Pose):
+    def twist_callback(self, twist_msg: Twist):
         if self.estop_active:
             self.get_logger().warn("Estop active. Ignoring correction command.")
             return
@@ -67,51 +75,110 @@ class OpenLoopCorrectionNode(Node):
             self.get_logger().warn("Still executing a correction. Ignoring new command.")
             return
 
-        # --- Translation setup ---
-        dx = msg.position.x
-        dy = msg.position.y
-        dz = msg.position.z
-        distance = math.sqrt(dx**2 + dy**2 + dz**2)
+        # Only use angular.y
+        self.target_angular_y = twist_msg.angular.y
 
-        # if distance < 0.01:
-        #     self.get_logger().info("Correction too small. Ignoring.")
-        #     return
+        # --------------------------------------------------
+        # If angular correction is more than 2 deg:
+        # execute rotation ONLY and break
+        # --------------------------------------------------
+        if abs(self.target_angular_y) > self.angular_threshold_rad:
+            self.rotation_duration = abs(self.target_angular_y) / self.angular_vel_mag
+            self.rotation_elapsed = 0.0
 
-        if not (0.01 <= distance <= 0.20):
-            self.get_logger().info("Correction out of bounds (0.01-0.20 m). Ignoring.")
+            twist = Twist()
+            twist.angular.z = -self.angular_vel_mag if self.target_angular_y > 0 else -self.angular_vel_mag
+            self.rotation_twist = twist
+
+            self.state = 'rotating'
+            self.get_logger().info(
+                f"Angular correction {math.degrees(self.target_angular_y):.2f} deg "
+                f"> 2 deg. Executing rotation only for {self.rotation_duration:.2f} s."
+            )
             return
 
-        norm_dx = dx / distance
-        norm_dy = dy / distance
-        norm_dz = dz / distance
+        # --------------------------------------------------
+        # Translation: convert from camera frame to drone FLU
+        # Camera: x right, y down, z forward
+        # Body FLU: x forward, y left, z up
+        # --------------------------------------------------
+        cam_x = twist_msg.linear.x
+        cam_y = twist_msg.linear.y
+        cam_z = twist_msg.linear.z
 
-        twist = Twist()
-        twist.linear.x = norm_dx * self.vel_mag
-        twist.linear.y = norm_dy * self.vel_mag
-        twist.linear.z = norm_dz * self.vel_mag
+        dx = cam_z     # forward
+        dy = -cam_x    # left
+        dz = -cam_y    # up
 
-        self.target_twist = twist
-        self.duration = distance / self.vel_mag
+        candidate_axes = [
+            ('x', dx),
+            ('y', dy),
+            ('z', dz),
+        ]
+
+        queued_moves = []
+
+        for axis_name, axis_value in candidate_axes:
+            abs_val = abs(axis_value)
+
+            # Skip tiny motions
+            if abs_val < 0.10:
+                self.get_logger().info(
+                    f"Skipping {axis_name}-axis: {axis_value:.3f} m "
+                    f"(below minimum threshold)."
+                )
+                continue
+
+            # Skip oversized motions
+            if abs_val > 0.60:
+                self.get_logger().info(
+                    f"Skipping {axis_name}-axis: {axis_value:.3f} m "
+                    f"(above maximum threshold)."
+                )
+                continue
+
+            axis_twist = Twist()
+            if axis_name == 'x':
+                axis_twist.linear.x = self.vel_mag if axis_value > 0 else -self.vel_mag
+            elif axis_name == 'y':
+                axis_twist.linear.y = self.vel_mag if axis_value > 0 else -self.vel_mag
+            elif axis_name == 'z':
+                axis_twist.linear.z = self.vel_mag if axis_value > 0 else -self.vel_mag
+
+            axis_duration = abs_val / self.vel_mag
+            queued_moves.append((axis_name, axis_value, axis_twist, axis_duration))
+
+        if not queued_moves:
+            self.get_logger().info("No valid per-axis translation to execute.")
+            return
+
+        self.translation_queue = queued_moves
+        self.start_next_translation()
+
+    def start_next_translation(self):
+        if not self.translation_queue:
+            self.get_logger().info("All sequential translations complete.")
+            self.state = 'idle'
+            self.target_twist = None
+            self.duration = 0.0
+            self.elapsed_time = 0.0
+            return
+
+        axis_name, axis_value, axis_twist, axis_duration = self.translation_queue.pop(0)
+
+        self.target_twist = axis_twist
+        self.duration = axis_duration
         self.elapsed_time = 0.0
-
-        # --- Yaw setup (stored for later) ---
-        q = msg.orientation
-        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-        yaw = math.atan2(siny_cosp, cosy_cosp)
-        # self.target_yaw = yaw
-        self.target_yaw = 0.0  # For now, ignore yaw correction
+        self.state = 'executing'
 
         self.get_logger().info(
-            f"Starting translation: {distance:.2f} m over {self.duration:.2f} s, "
-            f"yaw target = {math.degrees(yaw):.1f}°"
+            f"Executing {axis_name}-axis translation only: "
+            f"{axis_value:.3f} m over {axis_duration:.2f} s."
         )
-
-        self.state = 'executing'
 
     def control_loop(self):
         if self.estop_active:
-            self.cmd_vel_pub.publish(Twist())  # Force stop
+            self.cmd_vel_pub.publish(Twist())
             return
 
         if self.state == 'executing':
@@ -120,24 +187,11 @@ class OpenLoopCorrectionNode(Node):
                 self.cmd_vel_pub.publish(self.target_twist)
             else:
                 self.cmd_vel_pub.publish(Twist())
-                self.get_logger().info("Translation complete.")
-
-                # Start rotation if needed
-                if abs(self.target_yaw) > 0.01:
-                    self.rotation_duration = abs(self.target_yaw) / self.angular_vel_mag
-                    self.rotation_elapsed = 0.0
-
-                    twist = Twist()
-                    twist.angular.z = self.angular_vel_mag if self.target_yaw > 0 else -self.angular_vel_mag
-                    self.rotation_twist = twist
-
-                    self.state = 'rotating'
-                    self.get_logger().info(
-                        f"Starting rotation: {math.degrees(self.target_yaw):.1f}° "
-                        f"over {self.rotation_duration:.2f} s"
-                    )
-                else:
-                    self.state = 'idle'
+                self.get_logger().info("Axis translation complete.")
+                self.target_twist = None
+                self.duration = 0.0
+                self.elapsed_time = 0.0
+                self.start_next_translation()
 
         elif self.state == 'rotating':
             self.rotation_elapsed += 0.1
@@ -150,6 +204,7 @@ class OpenLoopCorrectionNode(Node):
                 self.rotation_twist = None
                 self.rotation_duration = 0.0
                 self.rotation_elapsed = 0.0
+                self.target_angular_y = 0.0
 
 
 def main(args=None):
