@@ -87,7 +87,7 @@ class OpenLoopCorrectionNode(Node):
             self.rotation_elapsed = 0.0
 
             twist = Twist()
-            twist.angular.z = -self.angular_vel_mag if self.target_angular_y > 0 else -self.angular_vel_mag
+            twist.angular.z = -self.angular_vel_mag if self.target_angular_y > 0 else self.angular_vel_mag
             self.rotation_twist = twist
 
             self.state = 'rotating'
@@ -118,35 +118,39 @@ class OpenLoopCorrectionNode(Node):
 
         queued_moves = []
 
+        min_thresh = 0.08
+        max_thresh = 0.60
+
         for axis_name, axis_value in candidate_axes:
             abs_val = abs(axis_value)
 
             # Skip tiny motions
-            if abs_val < 0.10:
+            if abs_val < min_thresh:
                 self.get_logger().info(
                     f"Skipping {axis_name}-axis: {axis_value:.3f} m "
-                    f"(below minimum threshold)."
+                    f"(below minimum threshold of {min_thresh:.2f} m)."
                 )
                 continue
 
-            # Skip oversized motions
-            if abs_val > 0.60:
+            # Clamp oversized motions to maximum threshold
+            exec_val = axis_value
+            if abs_val > max_thresh:
+                exec_val = math.copysign(max_thresh, axis_value)
                 self.get_logger().info(
-                    f"Skipping {axis_name}-axis: {axis_value:.3f} m "
-                    f"(above maximum threshold)."
+                    f"Clamping {axis_name}-axis from {axis_value:.3f} m "
+                    f"to {exec_val:.3f} m (maximum threshold {max_thresh:.2f} m)."
                 )
-                continue
 
             axis_twist = Twist()
             if axis_name == 'x':
-                axis_twist.linear.x = self.vel_mag if axis_value > 0 else -self.vel_mag
+                axis_twist.linear.x = self.vel_mag if exec_val > 0 else -self.vel_mag
             elif axis_name == 'y':
-                axis_twist.linear.y = self.vel_mag if axis_value > 0 else -self.vel_mag
+                axis_twist.linear.y = self.vel_mag if exec_val > 0 else -self.vel_mag
             elif axis_name == 'z':
-                axis_twist.linear.z = self.vel_mag if axis_value > 0 else -self.vel_mag
+                axis_twist.linear.z = self.vel_mag if exec_val > 0 else -self.vel_mag
 
-            axis_duration = abs_val / self.vel_mag
-            queued_moves.append((axis_name, axis_value, axis_twist, axis_duration))
+            axis_duration = abs(exec_val) / self.vel_mag
+            queued_moves.append((axis_name, exec_val, axis_twist, axis_duration))
 
         if not queued_moves:
             self.get_logger().info("No valid per-axis translation to execute.")

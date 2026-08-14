@@ -20,13 +20,13 @@ def generate_launch_description():
 
     velocity_arg = DeclareLaunchArgument(
         'velocity',
-        default_value='0.05',
+        default_value='0.10',
         description='Linear velocity magnitude in m/s'
     )
 
     ang_velocity_arg = DeclareLaunchArgument(
         'angular_velocity',
-        default_value='0.05',
+        default_value='0.10',
         description='Angular velocity in rad/s for yaw rotation'
     )
 
